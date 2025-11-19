@@ -1,0 +1,20 @@
+[
+    {
+        "username": "admin",
+        "password": "admin123",
+        "full_name": "Administrator",
+        "email": "admin@company.com"
+    },
+    {
+        "username": "patricia",
+        "password": "patricia123",
+        "full_name": "Patricia Capitanelli",
+        "email": "patricia@company.com"
+    },
+    {
+        "username": "manager",
+        "password": "manager123",
+        "full_name": "Sales Manager",
+        "email": "manager@company.com"
+    }
+]

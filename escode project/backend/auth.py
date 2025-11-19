@@ -11,12 +11,45 @@ class AuthManager:
     @staticmethod
     def login(username, password):
         """
-        Authenticate user and create session.
+        Authenticate user by username and create session.
         
         Returns:
             dict: User info if successful, None if failed
         """
         user = User.get_by_username(username)
+        
+        if not user or not User.verify_password(user, password):
+            return None
+        
+        # Create session
+        session_token = secrets.token_urlsafe(32)
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        session['token'] = session_token
+        session['login_time'] = datetime.now().isoformat()
+        session.permanent = True
+        
+        return {
+            'id': user['id'],
+            'username': user['username'],
+            'full_name': user['full_name'],
+            'email': user['email'],
+            'token': session_token
+        }
+    
+    @staticmethod
+    def login_by_email(email, password):
+        """
+        Authenticate user by email and create session.
+        
+        Args:
+            email: User's email address
+            password: User's password
+        
+        Returns:
+            dict: User info if successful, None if failed
+        """
+        user = User.get_by_email(email)
         
         if not user or not User.verify_password(user, password):
             return None

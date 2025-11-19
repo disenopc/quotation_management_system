@@ -22,6 +22,12 @@ class User:
         return db.execute_query(query, (username,), fetch_one=True)
     
     @staticmethod
+    def get_by_email(email):
+        """Get user by email"""
+        query = "SELECT * FROM users WHERE email = ? AND is_active = 1"
+        return db.execute_query(query, (email,), fetch_one=True)
+    
+    @staticmethod
     def verify_password(user, password):
         """Verify user password"""
         if not user:

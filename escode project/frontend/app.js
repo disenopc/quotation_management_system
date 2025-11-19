@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:5000';
+const API_URL = 'http://localhost:5001';
 
 // State
 let currentUser = null;
@@ -8,8 +8,14 @@ let selectedPublishers = new Set();
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    checkAuth();
-    setupEventListeners();
+    // CRITICAL FIX: Only run if we're on the dashboard page
+    // Check if dashboard elements exist
+    const isDashboard = document.getElementById('currentUser') !== null;
+    
+    if (isDashboard) {
+        checkAuth();
+        setupEventListeners();
+    }
 });
 
 // Authentication
@@ -25,11 +31,11 @@ async function checkAuth() {
             document.getElementById('currentUser').textContent = currentUser.full_name;
             loadDashboard();
         } else {
-            window.location.href = '/';
+            window.location.href = '/login.html';
         }
     } catch (error) {
         console.error('Auth check failed:', error);
-        window.location.href = '/';
+        window.location.href = '/login.html';
     }
 }
 
@@ -39,7 +45,7 @@ async function logout() {
             method: 'POST',
             credentials: 'include'
         });
-        window.location.href = '/';
+        window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout failed:', error);
     }
@@ -48,7 +54,10 @@ async function logout() {
 // Event Listeners
 function setupEventListeners() {
     // Logout
-    document.getElementById('logoutBtn').addEventListener('click', logout);
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', logout);
+    }
     
     // Tab Navigation
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -58,72 +67,109 @@ function setupEventListeners() {
     });
     
     // Sync Emails
-    document.getElementById('syncEmailsBtn').addEventListener('click', syncEmails);
+    const syncBtn = document.getElementById('syncEmailsBtn');
+    if (syncBtn) {
+        syncBtn.addEventListener('click', syncEmails);
+    }
     
     // Status Filter
-    document.getElementById('statusFilter').addEventListener('change', (e) => {
-        currentPage = 1;
-        loadInquiries(e.target.value);
-    });
+    const statusFilter = document.getElementById('statusFilter');
+    if (statusFilter) {
+        statusFilter.addEventListener('change', (e) => {
+            currentPage = 1;
+            loadInquiries(e.target.value);
+        });
+    }
     
     // Client Search
     let clientSearchTimeout;
-    document.getElementById('clientSearch').addEventListener('input', (e) => {
-        clearTimeout(clientSearchTimeout);
-        clientSearchTimeout = setTimeout(() => {
-            searchClients(e.target.value);
-        }, 500);
-    });
+    const clientSearch = document.getElementById('clientSearch');
+    if (clientSearch) {
+        clientSearch.addEventListener('input', (e) => {
+            clearTimeout(clientSearchTimeout);
+            clientSearchTimeout = setTimeout(() => {
+                searchClients(e.target.value);
+            }, 500);
+        });
+    }
     
     // Add Client
-    document.getElementById('addClientBtn').addEventListener('click', () => {
-        openModal('clientModal');
-    });
+    const addClientBtn = document.getElementById('addClientBtn');
+    if (addClientBtn) {
+        addClientBtn.addEventListener('click', () => {
+            openModal('clientModal');
+        });
+    }
     
-    document.getElementById('addClientForm').addEventListener('submit', createClient);
+    const addClientForm = document.getElementById('addClientForm');
+    if (addClientForm) {
+        addClientForm.addEventListener('submit', createClient);
+    }
     
     // Response Form
-    document.getElementById('responseForm').addEventListener('submit', sendResponse);
-    document.getElementById('aiGenerateBtn').addEventListener('click', generateAIResponse);
+    const responseForm = document.getElementById('responseForm');
+    if (responseForm) {
+        responseForm.addEventListener('submit', sendResponse);
+    }
+    
+    const aiGenerateBtn = document.getElementById('aiGenerateBtn');
+    if (aiGenerateBtn) {
+        aiGenerateBtn.addEventListener('click', generateAIResponse);
+    }
     
     // Publisher Search
     let publisherSearchTimeout;
-    document.getElementById('publisherSearch').addEventListener('input', (e) => {
-        clearTimeout(publisherSearchTimeout);
-        publisherSearchTimeout = setTimeout(() => {
-            searchPublishers(e.target.value);
-        }, 500);
-    });
+    const publisherSearch = document.getElementById('publisherSearch');
+    if (publisherSearch) {
+        publisherSearch.addEventListener('input', (e) => {
+            clearTimeout(publisherSearchTimeout);
+            publisherSearchTimeout = setTimeout(() => {
+                searchPublishers(e.target.value);
+            }, 500);
+        });
+    }
     
     // Import Publishers
-    document.getElementById('importPublishersBtn').addEventListener('click', () => {
-        alert('To import publishers, create a JSON file and send it to POST /api/publishers/bulk-import');
-    });
+    const importPublishersBtn = document.getElementById('importPublishersBtn');
+    if (importPublishersBtn) {
+        importPublishersBtn.addEventListener('click', () => {
+            alert('To import publishers, create a JSON file and send it to POST /api/publishers/bulk-import');
+        });
+    }
     
     // Bulk Email
-    document.getElementById('bulkEmailBtn').addEventListener('click', () => {
-        if (selectedPublishers.size === 0) {
-            alert('Please select publishers first');
-            return;
-        }
-        openModal('bulkEmailModal');
-        document.getElementById('selectedCount').textContent = selectedPublishers.size;
-    });
+    const bulkEmailBtn = document.getElementById('bulkEmailBtn');
+    if (bulkEmailBtn) {
+        bulkEmailBtn.addEventListener('click', () => {
+            if (selectedPublishers.size === 0) {
+                alert('Please select publishers first');
+                return;
+            }
+            openModal('bulkEmailModal');
+            document.getElementById('selectedCount').textContent = selectedPublishers.size;
+        });
+    }
     
-    document.getElementById('bulkEmailForm').addEventListener('submit', sendBulkEmail);
+    const bulkEmailForm = document.getElementById('bulkEmailForm');
+    if (bulkEmailForm) {
+        bulkEmailForm.addEventListener('submit', sendBulkEmail);
+    }
     
     // Select All Publishers
-    document.getElementById('selectAllPublishers').addEventListener('change', (e) => {
-        const checkboxes = document.querySelectorAll('.publisher-checkbox');
-        checkboxes.forEach(cb => {
-            cb.checked = e.target.checked;
-            if (e.target.checked) {
-                selectedPublishers.add(cb.dataset.email);
-            } else {
-                selectedPublishers.delete(cb.dataset.email);
-            }
+    const selectAllPublishers = document.getElementById('selectAllPublishers');
+    if (selectAllPublishers) {
+        selectAllPublishers.addEventListener('change', (e) => {
+            const checkboxes = document.querySelectorAll('.publisher-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = e.target.checked;
+                if (e.target.checked) {
+                    selectedPublishers.add(cb.dataset.email);
+                } else {
+                    selectedPublishers.delete(cb.dataset.email);
+                }
+            });
         });
-    });
+    }
     
     // Modal Close
     document.querySelectorAll('.modal-close').forEach(btn => {

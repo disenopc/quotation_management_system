@@ -5,7 +5,7 @@ Backend server for Quotation Management System using SQLite3 Database class.
 Flask handles API endpoints and connects frontend with database, email, and AI.
 """
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from datetime import datetime
 from config import config
@@ -22,15 +22,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 # Create Flask app
 app = Flask(__name__)
+app.config['SECRET_KEY'] = config.SECRET_KEY
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # Enable CORS for API routes
 CORS(
     app,
-    resources={r"/api/*": {"origins": "http://localhost:5173"}},  # URL exacta de tu frontend
+    resources={r"/api/*": {"origins": ["http://localhost:5001", "http://localhost:5173"]}},
     supports_credentials=True
 )
-
-
 
 # ---------------------------------------------------------------------------
 # Serve Frontend
@@ -39,8 +40,18 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../fron
 
 @app.route('/')
 def serve_index():
-    """Serve the main index.html"""
+    """Serve the login page"""
+    return send_from_directory(FRONTEND_DIR, 'login.html')
+
+@app.route('/dashboard')
+def serve_dashboard():
+    """Serve the main dashboard"""
     return send_from_directory(FRONTEND_DIR, 'index.html')
+
+@app.route('/login.html')
+def serve_login():
+    """Serve login page"""
+    return send_from_directory(FRONTEND_DIR, 'login.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
@@ -60,55 +71,53 @@ except AttributeError:
 # ============================================================================
 @app.route('/api/auth/login', methods=['POST'])
 def login():
+    """Login endpoint - accepts email and password"""
     data = request.get_json()
-    username = data.get('email')
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    email = data.get('email')
     password = data.get('password')
-
-    if not username or not password:
+    
+    logging.info(f"Login attempt with email: {email}")
+    
+    if not email or not password:
         return jsonify({"error": "Email and password required"}), 400
-
-    user = AuthManager.login(username, password)
+    
+    user = AuthManager.login_by_email(email, password)
+    
     if not user:
+        logging.warning(f"Failed login attempt for email: {email}")
         return jsonify({"error": "Invalid credentials"}), 401
-
+    
+    logging.info(f"Successful login for user: {user['email']}")
+    
     return jsonify({
-        "token": user['token'],
+        "success": True,
         "user": {
             "id": user['id'],
+            "username": user['username'],
             "email": user['email'],
             "full_name": user['full_name']
-        }
+        },
+        "token": user['token']
     }), 200
+
+@app.route('/api/auth/check', methods=['GET'])
+def check_auth():
+    """Check if user is authenticated"""
+    user = AuthManager.get_current_user()
+    if user:
+        return jsonify({'authenticated': True, 'user': user}), 200
+    return jsonify({'authenticated': False}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
 @login_required
 def logout():
+    """Logout endpoint"""
     AuthManager.logout()
     return jsonify({"message": "Logged out successfully"}), 200
-
-@app.route('/api/auth/change-password', methods=['POST'])
-@login_required
-def change_user_password():
-    data = request.get_json()
-    user = AuthManager.get_current_user()
-
-    if not user:
-        return jsonify({"error": "User not found in session"}), 401
-
-    old_password = data.get('old_password')
-    new_password = data.get('new_password')
-
-    if not old_password or not new_password:
-        return jsonify({"error": "Both passwords required"}), 400
-
-    if len(new_password) < config.MIN_PASSWORD_LENGTH:
-        return jsonify({"error": f"Password must be at least {config.MIN_PASSWORD_LENGTH} characters"}), 400
-
-    success = User.change_password(user['id'], old_password, new_password)
-    if success:
-        return jsonify({"message": "Password changed successfully"}), 200
-    else:
-        return jsonify({"error": "Invalid current password"}), 401
 
 # ============================================================================
 # CLIENT ROUTES
@@ -133,9 +142,10 @@ def get_clients():
 
     clients = [dict(r) for r in rows]
     return jsonify({
-        "clients": clients,
+        "data": clients,
         "total": total,
         "page": page,
+        "pages": (total + per_page - 1) // per_page,
         "per_page": per_page
     }), 200
 
@@ -149,7 +159,7 @@ def create_client():
             (data['full_name'], data['email'], data.get('phone'), data.get('notes'))
         )
         client_id = cursor.lastrowid
-    return jsonify({"id": client_id, "message": "Client created successfully"}), 201
+    return jsonify({"success": True, "client_id": client_id}), 201
 
 @app.route('/api/clients/<int:client_id>', methods=['PUT'])
 @login_required
@@ -157,10 +167,10 @@ def update_client(client_id):
     data = request.get_json()
     with db.get_connection() as conn:
         conn.execute(
-            "UPDATE clients SET full_name=?, email=?, phone=?, notes=?, updated_at=? WHERE id=?",
-            (data.get('full_name'), data.get('email'), data.get('phone'), data.get('notes'), datetime.utcnow(), client_id)
+            "UPDATE clients SET full_name=?, email=?, phone=?, notes=? WHERE id=?",
+            (data.get('full_name'), data.get('email'), data.get('phone'), data.get('notes'), client_id)
         )
-    return jsonify({"message": "Client updated successfully"}), 200
+    return jsonify({"success": True}), 200
 
 # ============================================================================
 # INQUIRY ROUTES
@@ -171,7 +181,6 @@ def get_inquiries():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     status_filter = request.args.get('status', '')
-    sort = request.args.get('sort', 'date')
 
     with db.get_connection() as conn:
         query = "SELECT * FROM inquiries"
@@ -179,58 +188,129 @@ def get_inquiries():
         if status_filter:
             query += " WHERE status=?"
             params = [status_filter]
-        if sort == 'date':
-            query += " ORDER BY inquiry_date DESC"
-        else:
-            query += " ORDER BY priority DESC"
-        query += " LIMIT ? OFFSET ?"
+        query += " ORDER BY received_at DESC LIMIT ? OFFSET ?"
         params += [per_page, (page-1)*per_page]
         rows = conn.execute(query, tuple(params)).fetchall()
         total = conn.execute("SELECT COUNT(*) as total FROM inquiries").fetchone()['total']
 
     inquiries = [dict(r) for r in rows]
-    return jsonify({"inquiries": inquiries, "total": total, "page": page, "per_page": per_page}), 200
+    return jsonify({
+        "data": inquiries,
+        "total": total,
+        "page": page,
+        "pages": (total + per_page - 1) // per_page,
+        "per_page": per_page
+    }), 200
+
+@app.route('/api/inquiries/<int:inquiry_id>', methods=['GET'])
+@login_required
+def get_inquiry(inquiry_id):
+    """Get single inquiry with client info"""
+    with db.get_connection() as conn:
+        row = conn.execute("""
+            SELECT i.*, c.full_name as client_name, c.email as client_email, c.phone as client_phone
+            FROM inquiries i
+            LEFT JOIN clients c ON i.client_id = c.id
+            WHERE i.id = ?
+        """, (inquiry_id,)).fetchone()
+    
+    if not row:
+        return jsonify({"error": "Inquiry not found"}), 404
+    
+    return jsonify(dict(row)), 200
+
+@app.route('/api/inquiries/stats', methods=['GET'])
+@login_required
+def get_inquiry_stats():
+    """Get inquiry statistics"""
+    with db.get_connection() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) as count FROM inquiries GROUP BY status").fetchall()
+    
+    stats = {row['status']: row['count'] for row in rows}
+    return jsonify(stats), 200
 
 @app.route('/api/inquiries', methods=['POST'])
 @login_required
 def create_inquiry():
     data = request.get_json()
-    client_email = data['client_email']
-    client_name = data['client_name']
+    client_id = data['client_id']
     subject = data['subject']
     message = data['message']
-    source = data.get('source', 'phone')
 
     with db.get_connection() as conn:
-        row = conn.execute("SELECT id FROM clients WHERE email=?", (client_email,)).fetchone()
-        if row:
-            client_id = row['id']
-        else:
-            cursor = conn.execute("INSERT INTO clients (full_name,email) VALUES (?,?)", (client_name, client_email))
-            client_id = cursor.lastrowid
-
-        priority = get_inquiry_priority(message)
         cursor = conn.execute(
-            "INSERT INTO inquiries (client_id, subject, message, source, priority, status) VALUES (?,?,?,?,?,?)",
-            (client_id, subject, message, source, priority, 'pending')
+            "INSERT INTO inquiries (client_id, subject, message, status) VALUES (?,?,?,?)",
+            (client_id, subject, message, 'pending')
         )
         inquiry_id = cursor.lastrowid
 
-    return jsonify({"id": inquiry_id, "message": "Inquiry created successfully"}), 201
+    return jsonify({"success": True, "inquiry_id": inquiry_id}), 201
+
+# ============================================================================
+# RESPONSE ROUTES
+# ============================================================================
+@app.route('/api/responses', methods=['POST'])
+@login_required
+def create_response():
+    """Create response to inquiry"""
+    data = request.get_json()
+    inquiry_id = data.get('inquiry_id')
+    response_text = data.get('response_text')
+    
+    if not inquiry_id or not response_text:
+        return jsonify({"error": "Missing required fields"}), 400
+    
+    user = AuthManager.get_current_user()
+    
+    with db.get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO responses (inquiry_id, user_id, response_text) VALUES (?,?,?)",
+            (inquiry_id, user['id'], response_text)
+        )
+        response_id = cursor.lastrowid
+        
+        conn.execute(
+            "UPDATE inquiries SET status='responded', responded_at=? WHERE id=?",
+            (datetime.utcnow(), inquiry_id)
+        )
+    
+    return jsonify({"success": True, "response_id": response_id, "email_sent": False}), 201
+
+# ============================================================================
+# AI ROUTES
+# ============================================================================
+@app.route('/api/ai/generate-response', methods=['POST'])
+@login_required
+def generate_ai_response():
+    """Generate AI response"""
+    data = request.get_json()
+    subject = data.get('subject')
+    message = data.get('message')
+    
+    if not subject or not message:
+        return jsonify({"error": "Subject and message required"}), 400
+    
+    try:
+        response = get_ai_response(subject, message)
+        return jsonify({"success": True, "response": response}), 200
+    except Exception as e:
+        logging.error(f"AI generation error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # PUBLISHER ROUTES
 # ============================================================================
-@app.route('/api/publishers/bulk-upload', methods=['POST'])
+@app.route('/api/publishers/bulk-import', methods=['POST'])
 @login_required
 def bulk_upload_publishers():
     data = request.get_json()
-    publishers_data = data.get('publishers', [])
+    publishers_data = data if isinstance(data, list) else data.get('publishers', [])
+    
     if not publishers_data:
         return jsonify({"error": "No publishers data provided"}), 400
 
     total_inserted = db.bulk_insert_publishers(publishers_data)
-    return jsonify({"message": f"Successfully uploaded {total_inserted} publishers", "total": total_inserted}), 200
+    return jsonify({"success": True, "imported": total_inserted, "total": len(publishers_data)}), 200
 
 @app.route('/api/publishers', methods=['GET'])
 @login_required
@@ -245,29 +325,43 @@ def get_publishers():
         if search:
             query += " WHERE name LIKE ? OR email LIKE ?"
             params = (f"%{search}%", f"%{search}%")
-        query += " LIMIT ? OFFSET ?"
+        query += " ORDER BY name ASC LIMIT ? OFFSET ?"
         params += (per_page, (page-1)*per_page)
         rows = conn.execute(query, params).fetchall()
         total = conn.execute("SELECT COUNT(*) as total FROM publishers").fetchone()['total']
 
     publishers = [dict(r) for r in rows]
-    return jsonify({"publishers": publishers, "total": total, "page": page, "per_page": per_page}), 200
+    return jsonify({
+        "data": publishers,
+        "total": total,
+        "page": page,
+        "pages": (total + per_page - 1) // per_page,
+        "per_page": per_page
+    }), 200
+
+@app.route('/api/publishers/count', methods=['GET'])
+@login_required
+def get_publisher_count():
+    """Get total publisher count"""
+    with db.get_connection() as conn:
+        total = conn.execute("SELECT COUNT(*) as total FROM publishers").fetchone()['total']
+    return jsonify({"count": total}), 200
+
+# ============================================================================
+# EMAIL ROUTES
+# ============================================================================
+@app.route('/api/email/sync', methods=['POST'])
+@login_required
+def sync_emails():
+    """Sync emails manually"""
+    try:
+        return jsonify({"success": True, "count": 0, "message": "Email sync not fully implemented"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # SYSTEM ROUTES
 # ============================================================================
-@app.route('/api/system/start-email-monitoring', methods=['POST'])
-@login_required
-def start_email_monitor():
-    email_handler.start_email_monitoring()
-    return jsonify({"message": "Email monitoring started"}), 200
-
-@app.route('/api/system/stop-email-monitoring', methods=['POST'])
-@login_required
-def stop_email_monitor():
-    email_handler.stop_email_monitoring()
-    return jsonify({"message": "Email monitoring stopped"}), 200
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()}), 200

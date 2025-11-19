@@ -14,7 +14,7 @@ import json
 import csv
 import time
 
-API_URL = 'http://localhost:5000'
+API_URL = 'http://localhost:5001'
 BATCH_SIZE = 1000  # Process 1000 publishers at a time
 
 def load_publishers_from_csv(file_path):
