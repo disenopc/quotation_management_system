@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Quotation Management</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2>Quotation Manager</h2>
+            </div>
+            
+            <ul class="nav-menu">
+                <li class="nav-item active" data-tab="inquiries">
+                    <span class="icon">📧</span>
+                    <span>Inquiries</span>
+                    <span class="badge" id="pendingBadge">0</span>
+                </li>
+                <li class="nav-item" data-tab="clients">
+                    <span class="icon">👥</span>
+                    <span>Clients</span>
+                </li>
+                <li class="nav-item" data-tab="responses">
+                    <span class="icon">💬</span>
+                    <span>Responses</span>
+                </li>
+                <li class="nav-item" data-tab="publishers">
+                    <span class="icon">📚</span>
+                    <span>Publishers</span>
+                </li>
+            </ul>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <p id="currentUser">Loading...</p>
+                    <button class="btn btn-secondary btn-sm" id="logoutBtn">Logout</button>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <h1 id="pageTitle">Inquiries</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="syncEmailsBtn">
+                        <span class="icon">🔄</span> Sync Emails
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Inquiries Tab -->
+            <div class="tab-content active" id="inquiriesTab">
+                <div class="filters">
+                    <select id="statusFilter" class="filter-select">
+                        <option value="">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="responded">Responded</option>
+                        <option value="closed">Closed</option>
+                    </select>
+                </div>
+                
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Client</th>
+                                <th>Subject</th>
+                                <th>Status</th>
+                                <th>Received</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inquiriesTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="pagination" id="inquiriesPagination"></div>
+            </div>
+            
+            <!-- Clients Tab -->
+            <div class="tab-content" id="clientsTab">
+                <div class="filters">
+                    <input 
+                        type="text" 
+                        id="clientSearch" 
+                        class="search-input" 
+                        placeholder="Search clients..."
+                    >
+                    <button class="btn btn-primary" id="addClientBtn">Add Client</button>
+                </div>
+                
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="pagination" id="clientsPagination"></div>
+            </div>
+            
+            <!-- Responses Tab -->
+            <div class="tab-content" id="responsesTab">
+                <div class="response-container">
+                    <div class="response-form-section">
+                        <h3>Send Response</h3>
+                        <form id="responseForm">
+                            <div class="form-group">
+                                <label>Select Inquiry</label>
+                                <select id="inquirySelect" required>
+                                    <option value="">Select an inquiry...</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Response Message</label>
+                                <textarea 
+                                    id="responseText" 
+                                    rows="10" 
+                                    required
+                                    placeholder="Type your response here..."
+                                ></textarea>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="button" class="btn btn-secondary" id="aiGenerateBtn">
+                                    AI Generate
+                                </button>
+                                <button type="submit" class="btn btn-primary">
+                                    Send Response
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Publishers Tab -->
+            <div class="tab-content" id="publishersTab">
+                <div class="filters">
+                    <input 
+                        type="text" 
+                        id="publisherSearch" 
+                        class="search-input" 
+                        placeholder="Search publishers..."
+                    >
+                    <button class="btn btn-primary" id="importPublishersBtn">Import Publishers</button>
+                    <button class="btn btn-secondary" id="bulkEmailBtn">Bulk Email</button>
+                </div>
+                
+                <div class="publisher-stats">
+                    <div class="stat-card">
+                        <h4>Total Publishers</h4>
+                        <p id="publisherCount">0</p>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="selectAllPublishers"></th>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Category</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="publishersTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="pagination" id="publishersPagination"></div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Modal for Inquiry Details -->
+    <div class="modal" id="inquiryModal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Inquiry Details</h2>
+            <div id="inquiryDetails"></div>
+        </div>
+    </div>
+    
+    <!-- Modal for Add Client -->
+    <div class="modal" id="clientModal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Add New Client</h2>
+            <form id="addClientForm">
+                <div class="form-group">
+                    <label>Full Name *</label>
+                    <input type="text" id="clientName" required>
+                </div>
+                <div class="form-group">
+                    <label>Email *</label>
+                    <input type="email" id="clientEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Phone</label>
+                    <input type="tel" id="clientPhone">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="clientNotes" rows="3"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Add Client</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal for Bulk Email -->
+    <div class="modal" id="bulkEmailModal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Send Bulk Email</h2>
+            <form id="bulkEmailForm">
+                <div class="form-group">
+                    <label>Subject</label>
+                    <input type="text" id="bulkSubject" required>
+                </div>
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea id="bulkMessage" rows="10" required></textarea>
+                </div>
+                <p class="info">Selected: <span id="selectedCount">0</span> publishers</p>
+                <button type="submit" class="btn btn-primary">Send to Selected</button>
+            </form>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
