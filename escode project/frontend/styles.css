@@ -185,18 +185,28 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
+    min-height: 60px;
 }
 
 .content-header h1 {
     font-size: 32px;
     font-weight: 700;
+    flex: 0 0 auto;
 }
 
 .header-actions {
-    display: flex;
+    display: flex !important;
     gap: 12px;
+    align-items: center;
+    flex-shrink: 0;
 }
 
+#syncEmailsBtn {
+    display: inline-flex !important;
+    white-space: nowrap;
+}
 /* Tabs */
 .tab-content {
     display: none;
