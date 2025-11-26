@@ -54,6 +54,9 @@ class AuthManager:
         if not user or not User.verify_password(user, password):
             return None
         
+        # Convert sqlite3.Row to dict
+        user = dict(user)
+        
         # Create session
         session_token = secrets.token_urlsafe(32)
         session['user_id'] = user['id']
@@ -67,6 +70,7 @@ class AuthManager:
             'username': user['username'],
             'full_name': user['full_name'],
             'email': user['email'],
+            'role': user.get('role', 'user'), 
             'token': session_token
         }
     
@@ -82,6 +86,8 @@ class AuthManager:
         if 'user_id' not in session:
             return None
         
+        
+        
         # Check session timeout
         if 'login_time' in session:
             login_time = datetime.fromisoformat(session['login_time'])
@@ -94,11 +100,16 @@ class AuthManager:
             AuthManager.logout()
             return None
         
+        
+          # Convert sqlite3.Row to dict
+        user = dict(user)
+        
         return {
             'id': user['id'],
             'username': user['username'],
             'full_name': user['full_name'],
-            'email': user['email']
+            'email': user['email'],
+            'role': user.get('role', 'user')  
         }
     
     @staticmethod

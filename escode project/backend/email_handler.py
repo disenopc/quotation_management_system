@@ -114,6 +114,7 @@ class EmailHandler:
         except Exception as e:
             logging.error(f"Error fetching emails: {str(e)}")
         return new_emails
+  
 
     def send_email(self, to_address, subject, body):
         """Send a single email"""
