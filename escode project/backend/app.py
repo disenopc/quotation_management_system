@@ -1,12 +1,9 @@
 """
-MAIN APPLICATION FILE WITH CONTENT FILTER
-
+MAIN APPLICATION FILE WITH CONTENT FILTER, ADVANCED TRACKING & CONVERSATION THREADS
 Backend server for Quotation Management System using SQLite3 Database class.
 Flask handles API endpoints and connects frontend with database, email, and AI.
-
-NUEVO: Filtro de contenido extraíble en sync_emails
+FEATURES: Content filter + Auto-detection + Follow-up tracking + Conversation threads
 """
-
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from datetime import datetime
@@ -75,7 +72,6 @@ except AttributeError:
 def login():
     """Login endpoint - accepts email and password"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "No data provided"}), 400
     
@@ -130,18 +126,21 @@ def get_clients():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     search = request.args.get('search', '')
-
+    
     with db.get_connection() as conn:
         query = "SELECT * FROM clients"
         params = []
+        
         if search:
             query += " WHERE full_name LIKE ? OR email LIKE ?"
             params = (f"%{search}%", f"%{search}%")
+        
         query += " LIMIT ? OFFSET ?"
         params += (per_page, (page-1)*per_page)
+        
         rows = conn.execute(query, params).fetchall()
         total = conn.execute("SELECT COUNT(*) as total FROM clients").fetchone()['total']
-
+    
     clients = [dict(r) for r in rows]
     return jsonify({
         "data": clients,
@@ -155,25 +154,28 @@ def get_clients():
 @login_required
 def create_client():
     data = request.get_json()
+    
     with db.get_connection() as conn:
         cursor = conn.execute(
             "INSERT INTO clients (full_name,email,phone,notes) VALUES (?,?,?,?)",
             (data['full_name'], data['email'], data.get('phone'), data.get('notes'))
         )
         client_id = cursor.lastrowid
+    
     return jsonify({"success": True, "client_id": client_id}), 201
 
 @app.route('/api/clients/<int:client_id>', methods=['PUT'])
 @login_required
 def update_client(client_id):
     data = request.get_json()
+    
     with db.get_connection() as conn:
         conn.execute(
             "UPDATE clients SET full_name=?, email=?, phone=?, company=?, notes=? WHERE id=?",
             (data.get('full_name'), data.get('email'), data.get('phone'), data.get('company'), data.get('notes'), client_id)
         )
+    
     return jsonify({"success": True}), 200
-
 
 @app.route('/api/clients/<int:client_id>', methods=['GET'])
 @login_required
@@ -181,11 +183,11 @@ def get_client(client_id):
     """Get single client by ID"""
     with db.get_connection() as conn:
         row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
-    
-    if not row:
-        return jsonify({"error": "Client not found"}), 404
-    
-    return jsonify(dict(row)), 200
+        
+        if not row:
+            return jsonify({"error": "Client not found"}), 404
+        
+        return jsonify(dict(row)), 200
 
 @app.route('/api/clients/<int:client_id>', methods=['DELETE'])
 @login_required
@@ -193,13 +195,11 @@ def delete_client(client_id):
     """Delete client - only for admin/manager"""
     user = AuthManager.get_current_user()
     
-    # Check if user is admin or manager
     if user.get('role') not in ['admin', 'manager']:
         return jsonify({"error": "Unauthorized - Admin or Manager access required"}), 403
     
     try:
         with db.get_connection() as conn:
-            # Check if client has inquiries
             inquiries = conn.execute(
                 "SELECT COUNT(*) as count FROM inquiries WHERE client_id=?", 
                 (client_id,)
@@ -211,14 +211,13 @@ def delete_client(client_id):
                     "inquiries_count": inquiries['count']
                 }), 400
             
-            # Delete client
             cursor = conn.execute("DELETE FROM clients WHERE id=?", (client_id,))
             
             if cursor.rowcount == 0:
                 return jsonify({"error": "Client not found"}), 404
             
-        return jsonify({"success": True, "message": "Client deleted successfully"}), 200
-        
+            return jsonify({"success": True, "message": "Client deleted successfully"}), 200
+    
     except Exception as e:
         logging.error(f"Error deleting client: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -232,9 +231,8 @@ def get_inquiries():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     status_filter = request.args.get('status', '')
-
+    
     with db.get_connection() as conn:
-        # JOIN con clients para traer el nombre
         query = """
             SELECT i.*, c.full_name as client_name, c.email as client_email
             FROM inquiries i
@@ -251,14 +249,13 @@ def get_inquiries():
         
         rows = conn.execute(query, tuple(params)).fetchall()
         
-        # Total también con filtro si aplica
         total_query = "SELECT COUNT(*) as total FROM inquiries"
         if status_filter:
             total_query += " WHERE status=?"
             total = conn.execute(total_query, (status_filter,)).fetchone()['total']
         else:
             total = conn.execute(total_query).fetchone()['total']
-
+    
     inquiries = [dict(r) for r in rows]
     return jsonify({
         "data": inquiries,
@@ -279,11 +276,11 @@ def get_inquiry(inquiry_id):
             LEFT JOIN clients c ON i.client_id = c.id
             WHERE i.id = ?
         """, (inquiry_id,)).fetchone()
-    
-    if not row:
-        return jsonify({"error": "Inquiry not found"}), 404
-    
-    return jsonify(dict(row)), 200
+        
+        if not row:
+            return jsonify({"error": "Inquiry not found"}), 404
+        
+        return jsonify(dict(row)), 200
 
 @app.route('/api/inquiries/stats', methods=['GET'])
 @login_required
@@ -291,8 +288,8 @@ def get_inquiry_stats():
     """Get inquiry statistics"""
     with db.get_connection() as conn:
         rows = conn.execute("SELECT status, COUNT(*) as count FROM inquiries GROUP BY status").fetchall()
+        stats = {row['status']: row['count'] for row in rows}
     
-    stats = {row['status']: row['count'] for row in rows}
     return jsonify(stats), 200
 
 @app.route('/api/inquiries', methods=['POST'])
@@ -302,23 +299,23 @@ def create_inquiry():
     client_id = data['client_id']
     subject = data['subject']
     message = data['message']
-
+    
     with db.get_connection() as conn:
         cursor = conn.execute(
             "INSERT INTO inquiries (client_id, subject, message, status) VALUES (?,?,?,?)",
             (client_id, subject, message, 'pending')
         )
         inquiry_id = cursor.lastrowid
-
+    
     return jsonify({"success": True, "inquiry_id": inquiry_id}), 201
 
 # ============================================================================
-# RESPONSE ROUTES
+# RESPONSE ROUTES WITH CONVERSATION THREADS
 # ============================================================================
 @app.route('/api/responses', methods=['POST'])
 @login_required
 def create_response():
-    """Create response to inquiry"""
+    """Create response to inquiry with initial message in conversation thread"""
     data = request.get_json()
     inquiry_id = data.get('inquiry_id')
     response_text = data.get('response_text')
@@ -329,12 +326,20 @@ def create_response():
     user = AuthManager.get_current_user()
     
     with db.get_connection() as conn:
+        # Create response
         cursor = conn.execute(
             "INSERT INTO responses (inquiry_id, user_id, response_text) VALUES (?,?,?)",
             (inquiry_id, user['id'], response_text)
         )
         response_id = cursor.lastrowid
         
+        # Create initial agent message in conversation thread
+        conn.execute(
+            "INSERT INTO conversation_messages (response_id, sender, message) VALUES (?, ?, ?)",
+            (response_id, 'agent', response_text)
+        )
+        
+        # Update inquiry status
         conn.execute(
             "UPDATE inquiries SET status='responded', responded_at=? WHERE id=?",
             (datetime.utcnow(), inquiry_id)
@@ -357,6 +362,8 @@ def get_responses():
                 r.response_text,
                 r.sent_at,
                 r.client_replied,
+                r.follow_up_method,
+                r.deal_status,
                 i.subject as inquiry_subject,
                 c.id as client_id,
                 c.full_name as client_name,
@@ -385,12 +392,12 @@ def get_responses():
         "per_page": per_page
     }), 200
 
-
 @app.route('/api/responses/<int:response_id>', methods=['GET'])
 @login_required
 def get_response(response_id):
-    """Get single response by ID"""
+    """Get single response by ID with full conversation thread"""
     with db.get_connection() as conn:
+        # Get response details
         query = """
             SELECT 
                 r.id,
@@ -398,6 +405,8 @@ def get_response(response_id):
                 r.response_text,
                 r.sent_at,
                 r.client_replied,
+                r.follow_up_method,
+                r.deal_status,
                 i.subject as inquiry_subject,
                 i.message as inquiry_message,
                 c.full_name as client_name,
@@ -410,22 +419,32 @@ def get_response(response_id):
             WHERE r.id = ?
         """
         row = conn.execute(query, (response_id,)).fetchone()
+        
+        if not row:
+            return jsonify({"error": "Response not found"}), 404
+        
+        response_data = dict(row)
+        
+        # Get conversation thread (all messages)
+        messages_query = """
+            SELECT id, sender, message, sent_at
+            FROM conversation_messages
+            WHERE response_id = ?
+            ORDER BY sent_at ASC
+        """
+        messages = conn.execute(messages_query, (response_id,)).fetchall()
+        response_data['conversation_thread'] = [dict(m) for m in messages]
     
-    if not row:
-        return jsonify({"error": "Response not found"}), 404
-    
-    return jsonify(dict(row)), 200
-
+    return jsonify(response_data), 200
 
 @app.route('/api/responses/<int:response_id>/mark-replied', methods=['PUT'])
 @login_required
 def mark_client_replied(response_id):
     """Mark that client replied to this response"""
     data = request.get_json()
-    client_replied = data.get('client_replied', 1)  # 1 = replied, 0 = not replied
+    client_replied = data.get('client_replied', 1)
     
     with db.get_connection() as conn:
-        # Verificar que existe
         response = conn.execute(
             "SELECT id FROM responses WHERE id = ?",
             (response_id,)
@@ -434,7 +453,6 @@ def mark_client_replied(response_id):
         if not response:
             return jsonify({"error": "Response not found"}), 404
         
-        # Actualizar
         conn.execute(
             "UPDATE responses SET client_replied = ? WHERE id = ?",
             (client_replied, response_id)
@@ -444,6 +462,89 @@ def mark_client_replied(response_id):
         "success": True, 
         "message": f"Response marked as {'replied' if client_replied else 'not replied'}"
     }), 200
+
+@app.route('/api/responses/<int:response_id>/update-follow-up', methods=['PUT'])
+@login_required
+def update_follow_up(response_id):
+    """Update follow-up method and deal status"""
+    data = request.get_json()
+    follow_up_method = data.get('follow_up_method')
+    deal_status = data.get('deal_status')
+    client_replied = data.get('client_replied')
+    
+    with db.get_connection() as conn:
+        response = conn.execute(
+            "SELECT id FROM responses WHERE id = ?",
+            (response_id,)
+        ).fetchone()
+        
+        if not response:
+            return jsonify({"error": "Response not found"}), 404
+        
+        update_fields = []
+        update_values = []
+        
+        if follow_up_method is not None:
+            update_fields.append("follow_up_method = ?")
+            update_values.append(follow_up_method)
+        
+        if deal_status is not None:
+            update_fields.append("deal_status = ?")
+            update_values.append(deal_status)
+        
+        if client_replied is not None:
+            update_fields.append("client_replied = ?")
+            update_values.append(client_replied)
+        
+        if update_fields:
+            update_values.append(response_id)
+            query = f"UPDATE responses SET {', '.join(update_fields)} WHERE id = ?"
+            conn.execute(query, tuple(update_values))
+    
+    return jsonify({
+        "success": True,
+        "message": "Response updated successfully"
+    }), 200
+
+@app.route('/api/responses/<int:response_id>/add-message', methods=['POST'])
+@login_required
+def add_message_to_conversation(response_id):
+    """Manually add a message to conversation thread"""
+    data = request.get_json()
+    sender = data.get('sender')
+    message = data.get('message')
+    
+    if not sender or not message:
+        return jsonify({"error": "sender and message required"}), 400
+    
+    if sender not in ['agent', 'client']:
+        return jsonify({"error": "sender must be 'agent' or 'client'"}), 400
+    
+    with db.get_connection() as conn:
+        response = conn.execute(
+            "SELECT id FROM responses WHERE id = ?",
+            (response_id,)
+        ).fetchone()
+        
+        if not response:
+            return jsonify({"error": "Response not found"}), 404
+        
+        cursor = conn.execute(
+            "INSERT INTO conversation_messages (response_id, sender, message) VALUES (?, ?, ?)",
+            (response_id, sender, message)
+        )
+        message_id = cursor.lastrowid
+        
+        if sender == 'client':
+            conn.execute(
+                "UPDATE responses SET client_replied = 1, follow_up_method = 'email' WHERE id = ?",
+                (response_id,)
+            )
+    
+    return jsonify({
+        "success": True,
+        "message_id": message_id
+    }), 201
 
 # ============================================================================
 # AI ROUTES
@@ -460,7 +561,6 @@ def generate_ai_response():
         return jsonify({"error": "Subject and message required"}), 400
     
     try:
-        # Get current user info for signature
         user = AuthManager.get_current_user()
         context = {
             'user_name': user.get('full_name', user.get('username')),
@@ -471,6 +571,7 @@ def generate_ai_response():
         
         response = get_ai_response(subject, message, context)
         return jsonify({"success": True, "response": response}), 200
+    
     except Exception as e:
         logging.error(f"AI generation error: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -486,7 +587,7 @@ def bulk_upload_publishers():
     
     if not publishers_data:
         return jsonify({"error": "No publishers data provided"}), 400
-
+    
     total_inserted = db.bulk_insert_publishers(publishers_data)
     return jsonify({"success": True, "imported": total_inserted, "total": len(publishers_data)}), 200
 
@@ -496,18 +597,21 @@ def get_publishers():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 100, type=int)
     search = request.args.get('search', '')
-
+    
     with db.get_connection() as conn:
         query = "SELECT * FROM publishers"
         params = []
+        
         if search:
             query += " WHERE name LIKE ? OR email LIKE ?"
             params = (f"%{search}%", f"%{search}%")
+        
         query += " ORDER BY name ASC LIMIT ? OFFSET ?"
         params += (per_page, (page-1)*per_page)
+        
         rows = conn.execute(query, params).fetchall()
         total = conn.execute("SELECT COUNT(*) as total FROM publishers").fetchone()['total']
-
+    
     publishers = [dict(r) for r in rows]
     return jsonify({
         "data": publishers,
@@ -526,82 +630,74 @@ def get_publisher_count():
     return jsonify({"count": total}), 200
 
 # ============================================================================
-# EMAIL ROUTES - CON FILTRO DE CONTENIDO EXTRAÍBLE
+# EMAIL ROUTES - WITH CONTENT FILTER, AUTO-DETECTION & CONVERSATION THREADS
 # ============================================================================
 @app.route('/api/email/sync', methods=['POST'])
 @login_required
 def sync_emails():
     """
-    Sync emails manually - SOLO NO LEIDOS (UNSEEN)
-    CON FILTRO: Solo procesa emails con información completa (min 3 de 4 campos)
+    Sync emails manually - UNSEEN ONLY
+    WITH FILTER: Only processes emails with complete info (min 3 of 4 fields)
+    WITH AUTO-DETECTION: Detects client replies and adds to conversation thread
     """
     try:
         import re
         
-        # Fetch new emails using email_handler
         new_emails = email_handler.fetch_new_emails()
         count = 0
         rejected_count = 0
         
-        logging.info(f"\nProcesando {len(new_emails)} emails nuevos...")
+        logging.info(f"\nProcessing {len(new_emails)} new emails...")
         
         for email_data in new_emails:
-            # Extract data
             from_email = email_data.get('from')
             body = email_data.get('body', '')
             raw_subject = email_data.get('subject', '').strip()
             
-            # ========================================================================
-            # PASO 1: EXTRAER INFORMACIÓN DE CONTACTO
-            # ========================================================================
-            
-            # Extract phone from body (various formats)
+            # Extract contact information
             phone = None
             phone_patterns = [
-                r'[Pp]hone[\s:]+\*?(\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*?',  # Phone: *+1-202-334-8912*
-                r'[Tt]el[eé]fono[\s:]+\*?(\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*?',  # Teléfono:
-                r'\*(\+\d{1,3}[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*',  # *+1-202-334-8912*
-                r'\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # General international
+                r'[Pp]hone[\s:]+\*?(\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*?',
+                r'[Tt]el[eé]fono[\s:]+\*?(\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*?',
+                r'\*(\+\d{1,3}[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9})\*',
+                r'\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',
             ]
+            
             for pattern in phone_patterns:
                 match = re.search(pattern, body)
                 if match:
                     phone_raw = match.group(1) if match.lastindex else match.group(0)
                     phone_raw = phone_raw.strip().replace('*', '')
-                    # Validar que tenga al menos 6 dígitos
                     if len(re.findall(r'\d', phone_raw)) >= 6:
                         phone = phone_raw
                         break
             
-            # Extract company from body (common patterns)
+            # Extract company
             company = None
             company_patterns = [
-                r'[Ff]rom\s+\*([A-Z][A-Za-z\s&.]+)\*',  # from *BrightWave Solutions*
-                r'[Ff]rom\s+([A-Z][A-Za-z\s&.]+?)(?:\.|$|\n)',  # from Acme Corp
+                r'[Ff]rom\s+\*([A-Z][A-Za-z\s&.]+)\*',
+                r'[Ff]rom\s+([A-Z][A-Za-z\s&.]+?)(?:\.|$|\n)',
                 r'(?:company|empresa|organization|org)[\s:]+\*?([A-Z][A-Za-z\s&.,]+?)\*?(?:\n|$|\.|,)',
                 r'\*([A-Z][A-Za-z\s&.]+(?:Solutions|Inc|LLC|Ltd|Corp|SA|SRL|Systems|Technologies|Group|Company))\*',
                 r'([A-Z][A-Za-z\s&.]+(?:Solutions|Inc|LLC|Ltd|Corp|SA|SRL|Systems|Technologies|Group))',
             ]
+            
             for pattern in company_patterns:
                 match = re.search(pattern, body, re.IGNORECASE | re.MULTILINE)
                 if match:
                     company = match.group(1).strip().replace('*', '')
-                    # Clean up company name
-                    company = re.sub(r'\s+', ' ', company)  # Remove extra spaces
-                    # Remove trailing periods or commas
+                    company = re.sub(r'\s+', ' ', company)
                     company = re.sub(r'[.,]+$', '', company)
-                    if len(company) > 3:  # Only if reasonable length
+                    if len(company) > 3:
                         break
             
-            # Extract name from email or body - improved patterns
+            # Extract name
             full_name = from_email.split('@')[0]
-            
-            # Try multiple name patterns (order matters - most specific first)
             name_patterns = [
-                r'(?:my name is|I am|I\'m)\s+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?\s+from',  # "My name is John Smith from"
-                r'(?:my name is|I am|I\'m)\s+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?',  # "My name is *Emily Parker*"
-                r'(?:name|nombre)[\s:]+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?',  # "Name: John Smith"
-                r'^\*?([A-Z][a-z]+\s+[A-Z][a-z]+)\*?',  # "*Emily Parker*" at start
+                r'(?:my name is|I am|I\'m)\s+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?\s+from',
+                r'(?:my name is|I am|I\'m)\s+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?',
+                r'(?:name|nombre)[\s:]+\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\*?',
+                r'^\*?([A-Z][a-z]+\s+[A-Z][a-z]+)\*?',
             ]
             
             for pattern in name_patterns:
@@ -610,48 +706,38 @@ def sync_emails():
                     full_name = name_match.group(1).strip()
                     break
             
-            # Extract client email from body (for WordPress forms and future integrations)
+            # Extract email
             client_email = None
             email_patterns = [
-                r'(?:email|e-mail|correo)[\s:]+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # "Email: user@example.com"
-                r'(?:contact|contacto)[\s:]+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # "Contact: user@example.com"
-                r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # Any email in body
+                r'(?:email|e-mail|correo)[\s:]+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+                r'(?:contact|contacto)[\s:]+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+                r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
             ]
             
             for pattern in email_patterns:
                 email_match = re.search(pattern, body, re.IGNORECASE)
                 if email_match:
                     extracted_email = email_match.group(1).lower()
-                    # Ignore common system emails
                     if not any(x in extracted_email for x in ['noreply', 'no-reply', 'wordpress', 'system', 'mailer']):
                         client_email = extracted_email
                         break
             
-            # If no email found in body, use sender email as fallback
             if not client_email:
                 client_email = from_email
             
-            # ========================================================================
-            # PASO 2: FILTRO DE CONTENIDO - Verificar información completa
-            # ========================================================================
-            
-            # Validar cada campo extraído
+            # Validate fields
             valid_name = bool(full_name and full_name != from_email.split('@')[0] and len(full_name) > 2)
             valid_email = bool(client_email and '@' in client_email)
             valid_phone = bool(phone)
             valid_company = bool(company and len(company) > 1)
             
-            # Contar campos válidos
             valid_fields_count = sum([valid_name, valid_email, valid_phone, valid_company])
             
-            # CONFIGURACIÓN: Ajusta este número según necesites (2, 3 o 4)
             MIN_REQUIRED_FIELDS = 3
             
-            # Si no cumple con el mínimo, RECHAZAR
             if valid_fields_count < MIN_REQUIRED_FIELDS:
                 rejected_count += 1
                 
-                # Log detallado de por qué se rechazó
                 has = []
                 missing = []
                 if valid_name: has.append('OK Name')
@@ -663,20 +749,14 @@ def sync_emails():
                 if valid_company: has.append('OK Company')
                 else: missing.append('MISSING Company')
                 
-                logging.warning(f"REJECTED Email ({valid_fields_count}/{MIN_REQUIRED_FIELDS} campos): {raw_subject[:50]}")
-                logging.warning(f"   Tiene: {', '.join(has) if has else 'Nada'}")
-                logging.warning(f"   Falta: {', '.join(missing)}")
-                continue  # Saltar este email
+                logging.warning(f"REJECTED Email ({valid_fields_count}/{MIN_REQUIRED_FIELDS} fields): {raw_subject[:50]}")
+                logging.warning(f"   Has: {', '.join(has) if has else 'None'}")
+                logging.warning(f"   Missing: {', '.join(missing)}")
+                continue
             
-            # ========================================================================
-            # PASO 3: Email válido - Procesarlo
-            # ========================================================================
+            logging.info(f"VALID Email ({valid_fields_count}/4 fields): {raw_subject[:50]}")
             
-            logging.info(f"VALID Email ({valid_fields_count}/4 campos): {raw_subject[:50]}")
-            
-            # Generate subject: Company - Date (or use original if present)
             if not raw_subject or raw_subject == '':
-                # Build subject from extracted data: Company - Date
                 current_date = datetime.now().strftime('%d/%m/%Y')
                 if company:
                     subject = f"{company} - {current_date}"
@@ -685,13 +765,7 @@ def sync_emails():
             else:
                 subject = raw_subject
             
-            # Get or create client
             with db.get_connection() as conn:
-                # ESTRATEGIA: Identificar cliente por (nombre + compañía)
-                # El email puede repetirse entre clientes, no es confiable
-                # Crear email sintético único para cumplir restricción UNIQUE en BD
-                
-                # Buscar cliente existente por nombre y compañía
                 cursor = conn.execute(
                     "SELECT id, email FROM clients WHERE full_name = ? AND company = ?",
                     (full_name, company if company else '')
@@ -699,22 +773,19 @@ def sync_emails():
                 client = cursor.fetchone()
                 
                 if not client:
-                    # Cliente nuevo - crear email sintético único
-                    # Formato: nombre.compañia@internal.local
                     name_slug = full_name.lower().replace(' ', '.').replace('*', '')
                     company_slug = company.lower().replace(' ', '.').replace('*', '') if company else 'unknown'
                     synthetic_email = f"{name_slug}.{company_slug}@internal.local"
                     
-                    # Create new client with extracted info
                     cursor = conn.execute(
                         "INSERT INTO clients (full_name, email, phone, company) VALUES (?, ?, ?, ?)",
                         (full_name, synthetic_email, phone, company)
                     )
                     client_id = cursor.lastrowid
-                    logging.info(f"   NEW cliente creado: {full_name} - {company} ({synthetic_email})")
+                    logging.info(f"   NEW client created: {full_name} - {company} ({synthetic_email})")
                 else:
                     client_id = client[0]
-                    # Update existing client if we found new info
+                    
                     update_fields = []
                     update_values = []
                     
@@ -728,33 +799,61 @@ def sync_emails():
                             f"UPDATE clients SET {', '.join(update_fields)} WHERE id = ?",
                             tuple(update_values)
                         )
-                        logging.info(f"   UPDATED Cliente actualizado: {full_name} - {company}")
+                    logging.info(f"   UPDATED client: {full_name} - {company}")
                 
-                # Check if inquiry already exists (avoid duplicates)
                 existing = conn.execute(
                     "SELECT id FROM inquiries WHERE client_id=? AND subject=? AND message=?",
                     (client_id, subject, body)
                 ).fetchone()
                 
                 if not existing:
-                    # Create inquiry only if it doesn't exist
-                    conn.execute(
+                    cursor = conn.execute(
                         "INSERT INTO inquiries (client_id, subject, message, status, received_at) VALUES (?, ?, ?, ?, ?)",
                         (client_id, subject, body, 'pending', datetime.utcnow())
                     )
+                    inquiry_id = cursor.lastrowid
                     count += 1
-                    logging.info(f"   CREATED Inquiry creado: {subject[:50]}")
+                    logging.info(f"   CREATED inquiry: {subject[:50]}")
+                    
+                    # ========================================================================
+                    # AUTO-DETECT: Did client reply to previous response?
+                    # ========================================================================
+                    cursor = conn.execute("""
+                        SELECT r.id, r.inquiry_id
+                        FROM responses r
+                        JOIN inquiries i ON r.inquiry_id = i.id
+                        WHERE i.client_id = ? AND r.client_replied = 0
+                        ORDER BY r.sent_at DESC
+                        LIMIT 1
+                    """, (client_id,))
+                    
+                    pending_response = cursor.fetchone()
+                    
+                    if pending_response:
+                        # Update response status
+                        conn.execute("""
+                            UPDATE responses 
+                            SET client_replied = 1, 
+                                follow_up_method = 'email'
+                            WHERE id = ?
+                        """, (pending_response['id'],))
+                        
+                        # ADD CLIENT MESSAGE TO CONVERSATION THREAD
+                        conn.execute("""
+                            INSERT INTO conversation_messages (response_id, sender, message, sent_at)
+                            VALUES (?, 'client', ?, ?)
+                        """, (pending_response['id'], body, datetime.utcnow()))
+                        
+                        logging.info(f"   AUTO-DETECTED: Client replied to response #{pending_response['id']}")
+                        logging.info(f"   MESSAGE ADDED to conversation thread")
                 else:
-                    logging.info(f"   DUPLICATE Inquiry duplicado, omitido: {subject[:50]}")
+                    logging.info(f"   DUPLICATE inquiry skipped: {subject[:50]}")
         
-        # ========================================================================
-        # RESUMEN FINAL
-        # ========================================================================
-        logging.info(f"\nRESUMEN DEL SYNC:")
-        logging.info(f"   Total procesados: {len(new_emails)}")
-        logging.info(f"   VALID Válidos (con info completa): {count + (len(new_emails) - count - rejected_count)}")
-        logging.info(f"   REJECTED Rechazados (info incompleta): {rejected_count}")
-        logging.info(f"   CREATED Inquiries creados: {count}\n")
+        logging.info(f"\nSYNC SUMMARY:")
+        logging.info(f"   Total processed: {len(new_emails)}")
+        logging.info(f"   VALID (complete info): {count + (len(new_emails) - count - rejected_count)}")
+        logging.info(f"   REJECTED (incomplete info): {rejected_count}")
+        logging.info(f"   CREATED inquiries: {count}\n")
         
         return jsonify({
             "success": True, 
@@ -763,10 +862,47 @@ def sync_emails():
             "total_processed": len(new_emails),
             "message": f"Synced {count} new emails (rejected {rejected_count} incomplete)"
         }), 200
-        
+    
     except Exception as e:
         logging.error(f"Email sync error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+# ============================================================================
+# ADMIN ROUTES
+# ============================================================================
+@app.route('/api/admin/migrate-conversations', methods=['POST'])
+@login_required
+def migrate_existing_conversations():
+    """One-time migration: Populate conversation_messages from existing responses"""
+    user = AuthManager.get_current_user()
+    
+    if user.get('role') != 'admin':
+        return jsonify({"error": "Admin access required"}), 403
+    
+    with db.get_connection() as conn:
+        responses = conn.execute("""
+            SELECT id, response_text, sent_at
+            FROM responses
+            WHERE id NOT IN (
+                SELECT DISTINCT response_id FROM conversation_messages
+            )
+        """).fetchall()
+        
+        count = 0
+        for resp in responses:
+            conn.execute("""
+                INSERT INTO conversation_messages (response_id, sender, message, sent_at)
+                VALUES (?, 'agent', ?, ?)
+            """, (resp['id'], resp['response_text'], resp['sent_at']))
+            count += 1
+        
+        logging.info(f"Migrated {count} existing responses to conversation threads")
+    
+    return jsonify({
+        "success": True,
+        "migrated": count,
+        "message": f"Successfully migrated {count} responses"
+    }), 200
 
 # ============================================================================
 # SYSTEM ROUTES
@@ -782,5 +918,7 @@ if __name__ == '__main__':
     print("Starting Quotation Management System...")
     print(f"Server running on http://localhost:5001")
     print(f"Debug mode: {config.DEBUG}")
-    print(f"Filtro de contenido: ACTIVADO (mínimo {3} de 4 campos)")
+    print(f"Content filter: ENABLED (minimum {3} of 4 fields)")
+    print(f"Auto-detection: ENABLED")
+    print(f"Conversation threads: ENABLED")
     app.run(debug=config.DEBUG, host='0.0.0.0', port=5001)
